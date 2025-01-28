@@ -1,96 +1,109 @@
-// src/models/QueryBuilder.js
-import { BaseModel } from "./BaseModel.js";
-
 export class QueryBuilder {
-  constructor(entity) {
-    this.entity = entity;
-    this.filters = {};
-    this.selectedFields = null; // Initialize selected fields
+
+  constructor(repository) {
+    this.repository = repository;
+    this.search = repository.search();
+    this.page = 0;
+    this.pageSize = 10;
   }
 
-  where(field, value) {
-    this.filters[field] = value;
+  // Set the page size
+  limit(size) {
+    this.pageSize = size;
     return this;
   }
 
-  select(fields) {
-    this.selectedFields = fields; // Store the selected fields
+  // Set the current page
+  page(number) {
+    this.page = number;
     return this;
   }
 
-  async get() {
-    const allRecords = await this.entity.all();
-    const filteredRecords = allRecords.filter((record) =>
-      Object.entries(this.filters).every(([key, value]) => record[key] === value)
+  // Execute the query and return paginated results
+  async paginate(page = 1, pageSize = 10) {
+    this.page = page - 1; // Redis-OM uses zero-based indexing
+    this.pageSize = pageSize;
+    const results = await this.search.return.page(this.page, this.pageSize);
+    const total = await this.search.return.count();
+
+    return {
+      data: results,
+      currentPage: page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize)
+    };
+  }
+
+  // Add a where clause
+  where(field, operator, value) {
+    if (operator === '=') {
+      this.search.where(field).equals(value);
+    } else if (operator === '>') {
+      this.search.where(field).gt(value);
+    } else if (operator === '>=') {
+      this.search.where(field).gte(value);
+    } else if (operator === '<') {
+      this.search.where(field).lt(value);
+    } else if (operator === '<=') {
+      this.search.where(field).lte(value);
+    } else if (operator === '!=') {
+      this.search.where(field).not.equalTo(value);
+    } else if (operator === 'between') {
+      this.search.where(field).between(value[0], value[1]);
+    }
+    return this;
+  }
+
+  // Add an AND condition
+  andWhere(field, operator, value) {
+    return this.where(field, operator, value);
+  }
+
+  // Add an OR condition
+  orWhere(field, operator, value) {
+    // Redis-OM doesn't natively support OR conditions, so this is a placeholder
+    // You can implement OR logic using multiple searches and combining results
+    throw new Error('OR conditions are not supported in this implementation');
+  }
+
+  // Full-text search
+  whereText(field, text) {
+    this.search.where(field).matches(text);
+    return this;
+  }
+
+  // Geographical search
+  whereLocation(field, longitude, latitude, radius, unit = 'miles') {
+    this.search.where(field).inRadius(circle => circle
+      .longitude(longitude)
+      .latitude(latitude)
+      .radius(radius)
+      .miles
     );
-
-    // If selectedFields is set, map the records to only include those fields
-    if (this.selectedFields) {
-      return filteredRecords.map(record => {
-        const selectedRecord = {};
-        this.selectedFields.forEach(field => {
-          selectedRecord[field] = record[field];
-        });
-        return selectedRecord;
-      });
-    }
-
-    return filteredRecords; // Return all fields if none are selected
+    return this;
   }
 
-  async join(relatedModel, foreignKey, conditions = {}) {
-    const allRecords = await this.get(); // Get the filtered records
-    const joinedData = [];
-
-    for (const record of allRecords) {
-      const relatedId = record[foreignKey];
-      if (relatedId) {
-        const relatedRecords = await relatedModel.all();
-        const filteredRelatedRecords = relatedRecords.filter(relatedRecord => {
-          // Check if the related record matches the conditions
-          return Object.entries(conditions).every(([key, condition]) => {
-            const [operator, value] = Array.isArray(condition) ? condition : ['=', condition];
-            switch (operator) {
-              case '=':
-                return relatedRecord[key] === value;
-              case '!=':
-                return relatedRecord[key] !== value;
-              case '>':
-                return relatedRecord[key] > value;
-              case '<':
-                return relatedRecord[key] < value;
-              case '>=':
-                return relatedRecord[key] >= value;
-              case '<=':
-                return relatedRecord[key] <= value;
-              default:
-                return true; // If the operator is not recognized, return true (no filtering)
-            }
-          });
-        });
-
-        // If there are matching related records, combine them
-        if (filteredRelatedRecords.length > 0) {
-          filteredRelatedRecords.forEach(relatedRecord => {
-            joinedData.push({ ...record, related: relatedRecord });
-          });
-        }
-      }
-    }
-
-    return joinedData;
+  // Order by a field
+  orderBy(field, direction = 'asc') {
+    this.search.sortBy(field, direction === 'asc' ? 'ASC' : 'DESC');
+    return this;
   }
 
-  async pluck(field) {
-    const records = await this.get();
-    return records.map(record => record[field]);
+  // Limit the number of results
+  limit(count) {
+    this.search.return.page(0, count);
+    return this;
   }
 
-  async key(field) {
-    const records = await this.get();
-    return records.reduce((acc, record) => {
-      acc[record[field]] = record; // Use the specified field as the key
-      return acc;
-    }, {});
+  // Execute the query and return results
+  async get() {
+    return await this.search.return.all();
+  }
+
+  // Execute the query and return the first result
+  async first() {
+    const results = await this.search.return.first();
+    return results;
   }
 }

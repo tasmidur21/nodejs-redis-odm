@@ -1,0 +1,17 @@
+version: '3.8'  # Specify the version of Docker Compose
+
+services:
+  redis-stack:
+    image: redis/redis-stack:latest
+    container_name: redis-stack
+    ports:
+      - "6377:6379"  # Redis default port
+      - "8001:8001"  # Redis Stack UI port
+    restart: unless-stopped  # Optional: restart policy
+
+  redis-insight:
+    image: redis/redisinsight:latest
+    container_name: redis-insight
+    ports:
+      - "8017:8001"  # Map host port 8002 to container port 8001
+    restart: unless-stopped  # Optional: restart policy
